@@ -14,15 +14,15 @@ library(shiny)
 library(shinyBS)
 library(cimir)
 library(tidyverse)
-library(htmltools)
 library(DT)
-library(shinycssloaders)
 
 
 # Here is where you put your CIMIS API Key. Key kept off remote repo.
 key <- dget("key.R")
 set_key(key=key)
 
+#Funny that the server time matters for this implementation. 
+Sys.setenv(TZ='America/Los_Angeles')
 
 # Data for user selection
 
@@ -32,10 +32,30 @@ if(!exists("kc_data")){
         stage=rep(c("Early Season","Mid Season", "Late Season"),2),
         kc = c(1,1.2,1.3,1,1.1,1.4)
     )
-}
+}    
+# Data is pulled on user loading. This could be done once per day 
+# but haven't figured out how to set up a scheduler in shinyapp.io yet. 
+# Pulls all data from the last 180 days since this is as far back as 
+# would be relevant
+
+df_198 <- cimis_data(targets = "198",
+                     start.date = Sys.Date()-180,
+                     end.date = Sys.Date()-1,
+                     items = "day-asce-eto,day-precip")
+df_152 <- cimis_data(targets = "152",
+                     start.date = Sys.Date()-180,
+                     end.date = Sys.Date()-1,
+                     items = "day-asce-eto,day-precip")
+df_217 <- cimis_data(targets = "217",
+                     start.date = Sys.Date()-180,
+                     end.date = Sys.Date()-1,
+                     items = "day-asce-eto,day-precip") 
+
+# Creates data frame from called CIMIS data
+df_all <- bind_rows(df_198,df_152,df_217)
 
 # Where the layout of the page exists
-ui <- fluidPage(
+ui <- fixedPage(
     includeCSS("styling.css"),
     
     # Application title
@@ -43,8 +63,7 @@ ui <- fluidPage(
 
      
     fluidRow(
-        column(2,
-            h3(textOutput("loading")),
+        column(3,
             textInput("zipcode", 
                       label = list(
                           tipify(icon("info-circle"),"This is used for determining the evapotranspiration (ETo) with Spatial CIMIS."),
@@ -88,7 +107,7 @@ ui <- fluidPage(
         ),
 
         
-        column(8,
+        column(4,
             dataTableOutput("table")
         )
     )
@@ -98,30 +117,7 @@ ui <- fluidPage(
 server <- function(input, output) {
     
 
-    
-    output$loading <- renderText({paste("Today is:",as.character(Sys.Date()))})
-    
-    # Data is pulled on user loading. This could be done once per day 
-    # but haven't figured out how to set up a scheduler in shinyapp.io yet. 
-    # Pulls all data from the last 180 days since this is as far back as 
-    # would be relevant
-    
-    df_198 <- cimis_data(targets = "198",
-                         start.date = Sys.Date()-180,
-                         end.date = Sys.Date()-1,
-                         items = "day-asce-eto,day-precip")
-    df_152 <- cimis_data(targets = "152",
-                         start.date = Sys.Date()-180,
-                         end.date = Sys.Date()-1,
-                         items = "day-asce-eto,day-precip")
-    df_217 <- cimis_data(targets = "217",
-                         start.date = Sys.Date()-180,
-                         end.date = Sys.Date()-1,
-                         items = "day-asce-eto,day-precip") 
-    
-    # Creates data frame from called CIMIS data
-    df_all <- bind_rows(df_198,df_152,df_217)
-    
+    #output$loading <- renderText({paste("Today is:",as.character(Sys.Date()))})
     output_table <- reactive({
         
         # where the validations live
@@ -222,7 +218,7 @@ server <- function(input, output) {
             mutate(irr=ETc-DayPrecip) %>% 
             filter(Date>=input$last_ir) %>% 
             filter(Station==station_data) %>% 
-            select(-kc)
+            select(-kc,-Station)
         
         return(table)
     })
@@ -231,7 +227,9 @@ server <- function(input, output) {
         DT::datatable(output_table(),options = 
                           list(lengthMenu = list(c(5,10,-1), c('5','10','All')),
                                pageLength=10,
-                               searching=FALSE))    
+                               searching=FALSE),
+                      rownames = FALSE,
+                      colnames = c("Date","ETo","Precipitation","ETc","Reccomended Irrigation (in)"))  
         })
     
     # Irrigation recommendation output in inches
