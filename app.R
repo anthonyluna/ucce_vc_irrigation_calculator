@@ -11,8 +11,12 @@
 ###############################################################################
 
 library(shiny)
+library(shinyBS)
 library(cimir)
 library(tidyverse)
+library(htmltools)
+library(DT)
+library(shinycssloaders)
 
 
 # Here is where you put your CIMIS API Key. Key kept off remote repo.
@@ -32,45 +36,59 @@ if(!exists("kc_data")){
 
 # Where the layout of the page exists
 ui <- fluidPage(
-
+    includeCSS("styling.css"),
+    
     # Application title
     titlePanel("Ventura County Irrigation Calculator"),
 
      
-    sidebarLayout(
-        sidebarPanel(
-            h3(textOutput("today")),
+    fluidRow(
+        column(2,
+            h3(textOutput("loading")),
             textInput("zipcode", 
-                      label = "Zip Code",
+                      label = list(
+                          tipify(icon("info-circle"),"This is used for determining the evapotranspiration (ETo) with Spatial CIMIS."),
+                          "Zip Code"),
                       placeholder = "99999",
                       width = "100%"),
             dateInput("last_ir",
-                      label = "Last Irrigation",
+                      label = list(
+                          tipify(icon("info-circle"),"Enter the date when the field was last irrigated."),
+                          "Last Irrigation"),
                       min = Sys.Date()-180,
                       max = Sys.Date()-1,
                       width = "100%",
                       autoclose=TRUE),
+            
             selectInput("crop",
-                           label = "Crop Type",
+                           label = list(
+                               tipify(icon("info-circle"),"This is used for choosing the crop coefficient (Kc)"),
+                               "Crop Type"),
                            choices = unique(kc_data$crop),
                            width = "100%"),
             selectInput("stage",
-                           label = "Crop Stage",
+                           label = list(
+                               tipify(icon("info-circle"),"This is used for adjusting the crop coefficient (Kc) according to the crop size"),
+                               "Crop Stage"),
                            choices = unique(kc_data$stage),
                            width = "100%"),
             numericInput("rate",
-                         label = "Irrigation Rate (in/h)",
-                         value=0.5,
+                         label = list(
+                             tipify(icon("info-circle"),"This is used to convert the inches of irrigation to hours of irrigation."),
+                             "Irrigation Rate (inches per hour)"),
+                         value=NULL,
                          min=0,
                          max=5,
-                         width = "100%")
-            
+                         width = "100%"),
+            h5( tipify(icon("info-circle"),"This is the recommended amount of irrigation your crop needs in inches based on the crop information provided and CIMIS weather data."),
+                strong("Total Irrigation Recommended: ")),
+            h4(textOutput("reccomend")),
+            h5(tipify(icon("info-circle"),"This is the recommended amount of irrigation your crop needs in hours based on the crop information provided, your irrigation system flow rate and CIMIS weather data."),strong("Total Irrigation Time: ")),
+            h4(textOutput("irr_time")),
         ),
 
         
-        mainPanel(
-            h3(textOutput("reccomend")),
-            h3(textOutput("irr_time")),
+        column(8,
             dataTableOutput("table")
         )
     )
@@ -81,7 +99,7 @@ server <- function(input, output) {
     
 
     
-    output$today <- renderText({paste("Today is:",as.character(Sys.Date()))})
+    output$loading <- renderText({paste("Today is:",as.character(Sys.Date()))})
     
     # Data is pulled on user loading. This could be done once per day 
     # but haven't figured out how to set up a scheduler in shinyapp.io yet. 
@@ -203,24 +221,29 @@ server <- function(input, output) {
             mutate(ETc=kc*DayAsceEto) %>%
             mutate(irr=ETc-DayPrecip) %>% 
             filter(Date>=input$last_ir) %>% 
-            filter(Station==station_data)
+            filter(Station==station_data) %>% 
+            select(-kc)
         
         return(table)
     })
     
     output$table <- renderDataTable({
-        return(output_table())    
+        DT::datatable(output_table(),options = 
+                          list(lengthMenu = list(c(5,10,-1), c('5','10','All')),
+                               pageLength=10,
+                               searching=FALSE))    
         })
     
-    # Irrigation reccomendation output in inches
+    # Irrigation recommendation output in inches
     output$reccomend <- renderText({
-        paste("Total Irrigation Reccomended: ",sum(output_table()$irr))
+        paste(sum(output_table()$irr), "inches")
         })
     
     # Irrigation time based on irrigation flow rate
     output$irr_time <- renderText({
-        paste("Total Irrigation Time (hr): ",
-              round(sum(output_table()$irr)/input$rate,digits=2),
+        #validate(need(input$rate,"Enter your irrigation rate to see the recommended hours of irrigation"))
+        req(input$rate>0)
+        paste(round(sum(output_table()$irr)/input$rate,digits=2),
               " hours")
     })
 }
